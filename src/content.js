@@ -47,6 +47,21 @@
 async function attempt(match, polling) {
   const resp = await chrome.runtime.sendMessage({ type: 'getCredential', appId: match.app_id })
 
+  // Not paired yet (or token expired/revoked): pair this install, then retry.
+  // Pairing is step-up gated, so if the user isn't fresh, fall through to the
+  // portal + poll like step-up.
+  if (resp?.error === 'pairing_required') {
+    const p = await chrome.runtime.sendMessage({ type: 'pair' })
+    if (p?.ok) return attempt(match, polling)
+    if (!polling) {
+      banner('MXID: connect this browser to MXID to auto-fill (verify your identity).', 'Connect', () => {
+        openPortal()
+        pollUntilFilled(match)
+      })
+    }
+    return false
+  }
+
   if (resp?.error === 'step_up' || resp?.error === 'not_logged_in') {
     if (polling) return false // keep waiting for the user to finish in the portal
     const isStepUp = resp.error === 'step_up'
