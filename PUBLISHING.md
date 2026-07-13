@@ -8,7 +8,7 @@ id is what you add to MXID's `MXID_SERVER_ALLOWED_ORIGINS`:
 chrome-extension://bfdbncnhgjdbaeipacekokclgbkhlpic
 ```
 
-> The private signing key is `key.pem` (git-ignored). Keep it — you need the same
+> The private signing key is `../mxid-login-key.pem` (outside the extension dir, secret). Keep it — you need the same
 > key to publish updates so the id stays stable. Losing it = new id = re-configure
 > CORS + re-deploy to every browser.
 
@@ -46,7 +46,7 @@ for small teams / self-serve.
 
 1. **Pack + sign the CRX** with the stable key:
    ```
-   google-chrome --pack-extension="$PWD" --pack-extension-key="$PWD/key.pem"
+   google-chrome --pack-extension="$PWD" --pack-extension-key="$PWD/../mxid-login-key.pem"
    # → ../mxid-extension.crx   (Edge: msedge --pack-extension=… works too)
    ```
 2. **Host** `mxid-extension.crx` + `deploy/update.xml` on an internal **HTTPS**
