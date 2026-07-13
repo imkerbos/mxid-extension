@@ -1,4 +1,4 @@
-# MXID Form-Fill Extension (MV3) — E1 skeleton
+# MXID Login Extension (MV3) — E1 skeleton
 
 Auto-submits login forms for MXID **form-fill (SWA)** apps using credentials the
 user vaulted in MXID. This is the **E1 skeleton** from

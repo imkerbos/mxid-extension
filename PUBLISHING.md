@@ -33,7 +33,7 @@ for small teams / self-serve.
 
 ## Model 1 — Chrome Web Store
 
-1. `bash scripts/pack.sh` → `build/mxid-form-fill-<ver>.zip`.
+1. `bash scripts/pack.sh` → `build/mxid-login-<ver>.zip`.
 2. Chrome Web Store **Developer Dashboard** ($5 one-time account) → **New item** →
    upload the zip.
 3. Fill the listing (name, icons, screenshots, privacy). Set **Visibility**:
