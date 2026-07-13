@@ -2,17 +2,13 @@
 // matches a known form app's login_url, it fills + submits the login form using
 // the credential the service worker reveals.
 //
-// E2 hardening over the naive one-shot querySelector:
-//   - waits for the form to mount (SPA/JS-rendered logins) via MutationObserver,
-//   - supports two-step logins (username view → password view),
-//   - fills static extra_fields (tenant/domain),
-//   - framework-safe value setting (native setter + input/change/blur),
-//   - a post-submit signal when the page doesn't advance (likely stale selectors),
-//   - runs at most once per page load.
+// E2 hardening: MutationObserver wait for the form, two-step logins, extra_fields,
+// framework-safe value setting, post-submit stale-selector signal, run-once.
+// E3 step-up: on step_up/not_logged_in, open the portal and poll — once the user
+// clears MFA there, auto-fill without a page reload.
 //
-// Security (FORM-FILL-SSO-B0-SECURITY-SPEC §6): it only acts when the CURRENT
-// page origin equals the descriptor's login_url origin, and only touches that
-// descriptor's own selectors.
+// Security (FORM-FILL-SSO-B0-SECURITY-SPEC §6): only acts when the CURRENT page
+// origin equals the descriptor's login_url origin, and only its own selectors.
 
 (async function () {
   if (window.__mxidFormFillRan) return
@@ -22,7 +18,7 @@
   try {
     descriptors = await chrome.runtime.sendMessage({ type: 'getDescriptors' })
   } catch {
-    return // service worker asleep / not ready
+    return
   }
   if (!Array.isArray(descriptors) || descriptors.length === 0) return
 
@@ -31,33 +27,62 @@
   )
   if (!match || !match.username_selector) return
 
-  // Wait for the username field — SPA login pages mount fields after load.
+  // The username field must exist (waited for) before we do anything.
   const userEl = await waitFor(match.username_selector, 8000)
-  if (!userEl) return // not the login form on this page (or selectors stale)
+  if (!userEl) return
 
+  await attempt(match, false)
+})()
+
+// attempt: fetch a credential and fill, or (when not polling) offer the step-up /
+// sign-in action and start polling for the moment it becomes available.
+async function attempt(match, polling) {
   const resp = await chrome.runtime.sendMessage({ type: 'getCredential', appId: match.app_id })
-  if (resp?.error === 'step_up') {
-    banner('MXID: identity check (MFA) required to fill this login.', 'Verify', openPortal)
-    return
-  }
-  if (resp?.error === 'not_logged_in') {
-    banner('MXID: sign in to MXID to auto-fill this login.', 'Sign in', openPortal)
-    return
+
+  if (resp?.error === 'step_up' || resp?.error === 'not_logged_in') {
+    if (polling) return false // keep waiting for the user to finish in the portal
+    const isStepUp = resp.error === 'step_up'
+    banner(
+      isStepUp
+        ? 'MXID: identity check (MFA) required to fill this login.'
+        : 'MXID: sign in to MXID to auto-fill this login.',
+      isStepUp ? 'Verify' : 'Sign in',
+      () => {
+        openPortal()
+        pollUntilFilled(match)
+      },
+    )
+    return false
   }
   if (resp?.error || !resp?.credential) {
-    console.warn('[MXID form-fill]', resp?.error || 'no credential')
-    return
+    if (!polling) console.warn('[MXID form-fill]', resp?.error || 'no credential')
+    return false
   }
-  const { account, credential } = resp.credential
+  await doFill(match, resp.credential)
+  return true
+}
 
-  // Username + any static extra fields (tenant code, domain, ...).
-  fill(userEl, account)
+// pollUntilFilled: after the user is sent to the portal to authenticate / step up,
+// retry every 3s (up to ~2 min) until the credential comes through, then fill.
+function pollUntilFilled(match) {
+  let tries = 0
+  const iv = setInterval(async () => {
+    tries += 1
+    const filled = await attempt(match, true)
+    if (filled || tries > 40) clearInterval(iv)
+  }, 3000)
+}
+
+// doFill: the actual username → (extra) → (next step) → password → submit flow.
+async function doFill(match, cred) {
+  const userEl = await waitFor(match.username_selector, 4000)
+  if (!userEl) return
+  fill(userEl, cred.account)
   for (const ef of match.extra_fields || []) {
     const el = ef.selector && document.querySelector(ef.selector)
     if (el) fill(el, ef.value)
   }
 
-  // Password may be on the same view or behind a "Next" step.
   let passEl = match.password_selector && document.querySelector(match.password_selector)
   if (!passEl && match.next_selector) {
     const next = document.querySelector(match.next_selector)
@@ -70,15 +95,14 @@
     console.warn('[MXID form-fill] password field not found')
     return
   }
-  fill(passEl, credential)
+  fill(passEl, cred.credential)
 
   const submit = match.submit_selector && document.querySelector(match.submit_selector)
   if (!submit) return
   submit.click()
 
-  // Success/failure signal: a successful login navigates away and tears down this
-  // context. If we're still here after a moment with the login field present, the
-  // submit didn't take — usually a stale selector after a site redesign.
+  // A successful login navigates away and tears down this context. If we're still
+  // here with the login field present, the submit didn't take (stale selectors).
   setTimeout(() => {
     if (document.querySelector(match.username_selector)) {
       banner(
@@ -88,7 +112,7 @@
       )
     }
   }, 3500)
-})()
+}
 
 // --- helpers ---
 
@@ -100,12 +124,12 @@ function sameOrigin(a, b) {
   }
 }
 
-// Resolve when `selector` matches an element, or null after `timeout` ms.
-// Checks immediately, then observes DOM mutations (SPA forms mount late).
+// Resolve when `selector` matches, or null after `timeout` ms. Immediate check,
+// then a MutationObserver (SPA forms mount late).
 function waitFor(selector, timeout) {
   return new Promise((resolve) => {
-    const found = document.querySelector(selector)
-    if (found) return resolve(found)
+    const f = document.querySelector(selector)
+    if (f) return resolve(f)
     let done = false
     const finish = (el) => {
       if (done) return
@@ -123,8 +147,7 @@ function waitFor(selector, timeout) {
   })
 }
 
-// Set a value the way React/Vue-controlled inputs notice: native setter + the
-// events their listeners fire on.
+// Framework-safe value setting: native setter + the events React/Vue listen for.
 function fill(el, value) {
   el.focus()
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
@@ -140,7 +163,6 @@ function openPortal() {
   chrome.runtime.sendMessage({ type: 'openPortal' })
 }
 
-// Minimal in-page prompt for cases needing user action.
 function banner(text, actionLabel, onAction) {
   const bar = document.createElement('div')
   bar.style.cssText =
