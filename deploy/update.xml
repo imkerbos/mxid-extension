@@ -1,11 +1,15 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <!--
   Enterprise auto-update manifest (Model 2, self-hosted forced-install).
-  Host this file + the signed .crx on an internal HTTPS server, and point the
-  MDM/GPO ExtensionInstallForcelist entry at this URL:
-     bfdbncnhgjdbaeipacekokclgbkhlpic;https://YOUR-HOST/update.xml
-  Bump version here (and in manifest.json) on every CRX you publish so Chrome
-  fetches the update.
+
+  You usually DON'T edit this by hand: the `release` workflow generates a filled
+  update.xml (correct version + codebase) on every tagged GitHub Release. Point
+  the policy at the stable Release URL:
+     bfdbncnhgjdbaeipacekokclgbkhlpic;https://github.com/imkerbos/mxid-extension/releases/latest/download/update.xml
+
+  This template is only for hosting the CRX on your OWN internal HTTPS instead:
+  set `codebase` to your crx URL, keep `version` in sync with manifest.json, and
+  point the MDM/GPO ExtensionInstallForcelist entry at wherever you host it.
 -->
 <gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
   <app appid='bfdbncnhgjdbaeipacekokclgbkhlpic'>

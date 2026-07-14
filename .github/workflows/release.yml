@@ -1,0 +1,66 @@
+name: release
+
+# Tag a version (e.g. v1.0.0) → build, sign the CRX with the committed keypair,
+# generate the enterprise update.xml, and publish both (plus the Web Store zip)
+# as GitHub Release assets. The "latest/download" URLs are stable across releases,
+# so a managed-Chrome policy pointed at update.xml auto-updates users.
+#
+# Requires a repo secret CRX_KEY = the contents of key.pem (the CRX signing key).
+# Settings → Secrets and variables → Actions → New repository secret.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # create releases + upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Restore signing key
+        env:
+          CRX_KEY: ${{ secrets.CRX_KEY }}
+        run: |
+          test -n "$CRX_KEY" || { echo "::error::CRX_KEY secret is not set — add key.pem contents as the CRX_KEY repo secret"; exit 1; }
+          printf '%s\n' "$CRX_KEY" > key.pem
+          chmod 600 key.pem
+
+      - name: Set version from tag
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          tmp=$(mktemp)
+          jq --arg v "$VER" '.version=$v' manifest.json > "$tmp" && mv "$tmp" manifest.json
+          echo "packaging v$VER"
+
+      - name: Build unpacked + store zip
+        run: bash scripts/pack.sh
+
+      - name: Install signer
+        run: npm install
+
+      - name: Sign CRX + generate update.xml
+        env:
+          CRX_URL: https://github.com/${{ github.repository }}/releases/latest/download/mxid-login.crx
+        run: node scripts/build-crx.mjs
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/mxid-login.crx
+            build/update.xml
+            build/mxid-login-${{ env.VER }}.zip
+          generate_release_notes: true
+
+      - name: Shred signing key
+        if: always()
+        run: rm -f key.pem

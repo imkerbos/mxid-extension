@@ -1,0 +1,13 @@
+{
+  "name": "mxid-login-extension",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MXID Login browser extension (MV3) — packaging & signing tooling. The shipped version lives in manifest.json.",
+  "scripts": {
+    "pack": "bash scripts/pack.sh",
+    "build:crx": "node scripts/build-crx.mjs"
+  },
+  "devDependencies": {
+    "crx3": "^1.1.3"
+  }
+}
