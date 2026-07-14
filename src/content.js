@@ -176,10 +176,11 @@ function runCapture() {
   }
   const onClick = (e) => {
     const btn = e.target.closest && e.target.closest('button, input[type=submit], [type=submit], [role=button]')
-    if (btn && passwordEl && passwordEl.value) {
-      // give the value a tick to settle, then finish
-      setTimeout(() => finish(btn), 50)
-    }
+    // Finish synchronously on the click: the login submit can trigger a fast 301
+    // that tears down this content script within tens of ms, so a setTimeout here
+    // would race the navigation and lose the capture. The typed values are already
+    // present at click time, so there is nothing to wait for.
+    if (btn && passwordEl && passwordEl.value) finish(btn)
   }
   const onSubmit = (e) => {
     const btn =
@@ -217,6 +218,17 @@ function runCapture() {
     // credential in one shot (if this page matches a known form app).
     const account = usernameEl.value || ''
     const credential = passwordEl.value || ''
+    // Backstop against the post-login navigation race: stash the capture to
+    // storage synchronously BEFORE the message round-trip. A fast 301 can unload
+    // this page before the SW hears captureResult, but the storage write is
+    // dispatched to the browser process and survives the unload — the SW then
+    // flushes pendingCapture on its storage.onChanged / wake handlers even if this
+    // message never lands. The message below is the fast path when the page stays.
+    chrome.storage.local.set({
+      capturing: false,
+      lastCapture: descriptor,
+      pendingCapture: { descriptor, account, credential },
+    })
     chrome.runtime
       .sendMessage({ type: 'captureResult', descriptor, account, credential })
       .then((r) => {

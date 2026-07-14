@@ -79,6 +79,38 @@ async function storeCredential(appId, account, credential) {
   }
 }
 
+// flushPendingCapture stores the credential the content script stashed at login
+// time. It runs from multiple triggers (captureResult message, storage.onChanged,
+// SW wake, sync alarm) so a torn-down message after a fast post-login 301 never
+// loses the credential. Idempotent: storeCredential is a PUT, so re-running is safe.
+async function flushPendingCapture() {
+  const { pendingCapture, descriptors } = await chrome.storage.local.get([
+    'pendingCapture',
+    'descriptors',
+  ])
+  if (!pendingCapture) return { credentialSaved: false }
+  const { descriptor, account, credential } = pendingCapture
+  let credentialSaved = false
+  if (account && credential && descriptor && descriptor.login_url) {
+    const app = (descriptors || []).find(
+      (d) => d.login_url && sameOriginUrl(d.login_url, descriptor.login_url),
+    )
+    if (app && app.app_id && app.credential_mode !== 'shared') {
+      credentialSaved = await storeCredential(app.app_id, account, credential)
+    } else {
+      // No matching per_user form app to store into — nothing to retry, drop it.
+      await chrome.storage.local.remove('pendingCapture')
+      return { credentialSaved: false }
+    }
+  }
+  // Clear only on success (or when there was nothing to store) so a transient
+  // network failure keeps the pending creds for a later trigger to retry.
+  if (credentialSaved || !(account && credential)) {
+    await chrome.storage.local.remove('pendingCapture')
+  }
+  return { credentialSaved }
+}
+
 async function getCredential(appId) {
   const base = await getBaseUrl()
   const token = await getToken()
@@ -137,20 +169,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: true })
         break
       case 'captureResult': {
+        // Fast path: the content script already stashed pendingCapture to storage
+        // synchronously, so flush from there (single source of truth). If this
+        // message was lost to a post-login nav, the storage.onChanged / wake
+        // handlers below flush the same pendingCapture instead.
         await chrome.storage.local.set({ capturing: false, lastCapture: msg.descriptor })
-        // If this login page matches a form app the user can already launch,
-        // store the credential they just typed — recording = descriptor + creds.
-        let credentialSaved = false
-        if (msg.account && msg.credential && msg.descriptor && msg.descriptor.login_url) {
-          const { descriptors } = await chrome.storage.local.get('descriptors')
-          const app = (descriptors || []).find(
-            (d) => d.login_url && sameOriginUrl(d.login_url, msg.descriptor.login_url),
-          )
-          if (app && app.app_id && app.credential_mode !== 'shared') {
-            credentialSaved = await storeCredential(app.app_id, msg.account, msg.credential)
-          }
-        }
-        sendResponse({ ok: true, credentialSaved })
+        const res = await flushPendingCapture()
+        sendResponse({ ok: true, credentialSaved: res.credentialSaved })
         break
       }
       default:
@@ -164,9 +189,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 chrome.runtime.onInstalled.addListener(() => {
   syncDescriptors()
+  flushPendingCapture()
   chrome.alarms.create('sync', { periodInMinutes: 30 })
 })
 
+// SW woke on browser start — flush any capture left pending from a prior session.
+if (chrome.runtime.onStartup) chrome.runtime.onStartup.addListener(() => flushPendingCapture())
+
 chrome.alarms.onAlarm.addListener((a) => {
-  if (a.name === 'sync') syncDescriptors()
+  if (a.name === 'sync') {
+    syncDescriptors()
+    flushPendingCapture() // retry a capture whose store failed transiently
+  }
+})
+
+// Primary backstop: when the content script writes pendingCapture synchronously
+// during the login (even as the page unloads), this wakes the SW to flush it,
+// independent of whether the captureResult message was delivered.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.pendingCapture && changes.pendingCapture.newValue) {
+    flushPendingCapture()
+  }
 })
