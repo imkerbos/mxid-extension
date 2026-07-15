@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MXID Login",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Auto-submits login forms for internal apps using credentials vaulted in MXID.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArzcWqgZujrUPr4nXgmhLSlOMxmaNul5e0dEfNZUuglLfYjMyIF/jH8xm8o+FN3f8kvhT2G5jhphEnappJbkzU4GGNpMjkOwqy2fdD99gPzplDho8O1qRjsIYhMBHJGsxD1xd3mGLDZjM5RUii3deRjYmus+LYqhn6C2zkC0jc5UqDVQZSFFN4tGx9eKq6nULne905XFG5F0NA8GODa4EmWcua3R/2JMf0Nd6Z2tEfCT6SUE3rAZ1WoeGEazcqHH0NP44NxunU+sPpNWmxqq0g7ndUbi6UF1M/HMLhcC81WGgRQiQv+pnwOAS7YFVFTaEDABe0ISu2NUNA5PIplIpsQIDAQAB",
   "permissions": [

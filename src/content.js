@@ -248,9 +248,37 @@ function runCapture() {
 // selectorFor builds a stable-ish selector: prefer #id, then [name], then a short
 // path with :nth-of-type. Not bulletproof — capture is a starting point an admin
 // confirms in the console.
+// looksGeneratedId flags framework-auto-generated ids that change on every
+// render — React (`_r_8_`, `:r0:`), MUI, Radix, Headless UI, Ember, purely
+// numeric, or hash-like. A captured `#<generated-id>` selector matches at
+// capture time but NEVER on the next page load (the id is different), so
+// auto-fill silently fails. Treat these as unstable and avoid anchoring on them.
+function looksGeneratedId(id) {
+  return (
+    /^(_r_|mui-|ember|radix-|headlessui|react-aria)/i.test(id) ||
+    /^:?r[0-9a-z]+:?$/i.test(id) || // React 18 useId: ":r0:", "r1a"
+    /_r_?\d/.test(id) ||
+    /^\d+$/.test(id) ||
+    /[0-9a-f]{8,}/i.test(id) // embedded long hex hash
+  )
+}
+
+// stableId returns the element's id only when it looks durable (not framework-
+// generated), else ''.
+function stableId(el) {
+  return el.id && !looksGeneratedId(el.id) ? el.id : ''
+}
+
 function selectorFor(el) {
-  if (el.id) return '#' + cssEscape(el.id)
-  if (el.getAttribute('name')) return el.tagName.toLowerCase() + '[name="' + el.getAttribute('name') + '"]'
+  // Prefer a form field's `name`: it is the POST key, semantic and stable across
+  // renders. An id is checked only when it looks durable — on SPA frameworks the
+  // id is often auto-generated and changes each load, which broke captured
+  // selectors (a `#_r_8_` never re-matches). Fall back to a structural path
+  // (nth-of-type), which outlives a generated id, rather than anchoring on one.
+  const name = el.getAttribute('name')
+  if (name) return el.tagName.toLowerCase() + '[name="' + name + '"]'
+  const sid = stableId(el)
+  if (sid) return '#' + cssEscape(sid)
   const parts = []
   let node = el
   while (node && node.nodeType === 1 && parts.length < 4) {
@@ -261,7 +289,8 @@ function selectorFor(el) {
       if (sibs.length > 1) part += ':nth-of-type(' + (sibs.indexOf(node) + 1) + ')'
     }
     parts.unshift(part)
-    if (node.id) { parts[0] = '#' + cssEscape(node.id); break }
+    const nid = stableId(node)
+    if (nid) { parts[0] = '#' + cssEscape(nid); break }
     node = parent
   }
   return parts.join(' > ')
